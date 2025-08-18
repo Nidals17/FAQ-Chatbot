@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  rag-chatbot:
+    build: .
+    container_name: rag-chatbot-app
+    ports:
+      - "8000:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    volumes:
+      # Persist vector database
+      - ./api/chroma_db:/app/chroma_db
+      # Persist documents
+      - ./api/FAQ-docs:/app/FAQ-docs
+      # Development: hot reload (remove in production)
+      - ./api:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    name: rag-chatbot-network
