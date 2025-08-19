@@ -117,32 +117,38 @@ async def chat(req: QuestionRequest):
     # Step 0: Check if user is confirming a pending question
     if pending_question["type"] and is_affirmative(query):
         if pending_question["type"] == "GENERAL":
-            answer = ask_llm(pending_question["question"], chat_history.messages)
+            # 🔧 FIX: use user's follow-up query instead of re-asking old question
+            answer = ask_llm(query, chat_history.messages)
             source_summary = None
             # Reset pending question
             pending_question["type"] = None
             pending_question["question"] = None
             
         elif pending_question["type"] == "RAG":
-            # Provide additional info from remaining docs
-            docs_and_scores = vectorstore.similarity_search_with_score(pending_question["question"], k=3)
+            # ✅ Re-search with the follow-up query, not the original
+            docs_and_scores = vectorstore.similarity_search_with_score(query, k=3)
             relevance_threshold = 0.8
-            # Exclude already used docs
+            
+            # Instead of excluding entire sources, exclude only *exact chunks* already used
             new_docs = [
                 doc for doc, score in docs_and_scores
-                if score >= relevance_threshold and doc.metadata.get("source") not in pending_question["used_docs"]
+                if score >= relevance_threshold and doc.page_content not in pending_question["used_docs"]
             ]
 
             if new_docs:
                 context_text = "\n\n".join(doc.page_content for doc in new_docs)
-                question_with_context = f"Answer using the following documents:\n{context_text}\n\nQuestion: {pending_question['question']}"
+                question_with_context = f"Answer using the following documents:\n{context_text}\n\nQuestion: {query}"
                 answer = ask_llm(question_with_context, chat_history.messages)
+
+                # Track used chunks instead of whole files
+                for doc in new_docs:
+                    pending_question["used_docs"].add(doc.page_content)
+
                 source_names = [doc.metadata.get("source", "unknown").replace("FAQ-docs\\", "") for doc in new_docs]
-                pending_question["used_docs"].update(source_names)
                 source_summary = ", ".join(set(source_names))
             else:
-                # No new docs left, fallback to general knowledge
-                answer = ask_llm(pending_question["question"], chat_history.messages)
+                # If nothing new, fall back to LLM general knowledge
+                answer = ask_llm(query, chat_history.messages)
                 source_summary = None
 
             # Reset pending question
